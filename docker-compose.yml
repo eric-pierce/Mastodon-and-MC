@@ -1,0 +1,653 @@
+version: "3.9"
+
+########################### NETWORKS
+networks:
+  traefik:
+    name: traefik
+    external: true
+  default:
+    driver: bridge
+  socket-proxy:
+    name: socket-proxy
+    external: true
+  internal:
+    external: false
+  vpn-subnet:
+    name: vpn-subnet
+    external: true
+
+########################### SECRETS
+secrets:
+  cloudflare_email:
+    file: $SECRETSDIR/cloudflare_email
+  cloudflare_api_key:
+    file: $SECRETSDIR/cloudflare_api_key
+  postgres_root_password:
+    file: $SECRETSDIR/postgres_root_password
+  restic_password:
+    file: $SECRETSDIR/restic_password
+
+########################### SERVICES
+services:
+  traefik:
+    container_name: traefik
+    image: traefik:latest
+    restart: unless-stopped
+    command: # CLI arguments
+      - --global.checkNewVersion=true
+      - --global.sendAnonymousUsage=false
+      - --entryPoints.http.address=:80
+      - --entryPoints.https.address=:443
+        # Allow these IPs to set the X-Forwarded-* headers - Cloudflare IPs: https://www.cloudflare.com/ips/
+      - --entrypoints.https.forwardedHeaders.trustedIPs=$CLOUDFLARE_IPS,$LOCAL_IPS
+      - --entryPoints.traefik.address=:8080
+      - --entrypoints.https.http.tls.certresolver=dns-cloudflare
+      - --api=false
+      - --log=true
+      - --log.level=DEBUG # (Default: error) DEBUG, INFO, WARN, ERROR, FATAL, PANIC
+      - --accessLog=true
+      - --accessLog.filePath=/traefik.log
+      - --accessLog.bufferingSize=100 # Configuring a buffer of 100 lines
+      - --accessLog.filters.statusCodes=400-499
+      - --providers.docker=true
+      - --providers.docker.endpoint=tcp://socket-proxy:2375
+      - --providers.docker.defaultrule=Host(`{{ index .Labels "com.docker.compose.service" }}.$DOMAINNAME`, `$MAST_DOMAIN`)
+      - --entrypoints.https.http.tls.domains[0].main=$DOMAINNAME
+      - --entrypoints.https.http.tls.domains[0].sans=*.$DOMAINNAME
+      - --entrypoints.https.http.tls.domains[1].main=$MAST_DOMAIN # Pulls main cert for second domain
+      - --entrypoints.https.http.tls.domains[1].sans=*.$MAST_DOMAIN # Pulls wildcard cert for second domain
+      - --providers.docker.exposedByDefault=false
+      - --providers.docker.network=traefik
+      - --providers.docker.swarmMode=false
+      - --providers.file.directory=/rules # Load dynamic configuration from one or more .toml or .yml files in a directory.
+      - --providers.file.watch=true # Only works on top level files in the rules folder
+      #- --certificatesResolvers.dns-cloudflare.acme.caServer=https://acme-staging-v02.api.letsencrypt.org/directory # LetsEncrypt Staging Server - uncomment when testing
+      - --certificatesResolvers.dns-cloudflare.acme.email=$CLOUDFLARE_EMAIL
+      - --certificatesResolvers.dns-cloudflare.acme.storage=/acme.json
+      - --certificatesResolvers.dns-cloudflare.acme.dnsChallenge.provider=cloudflare
+      - --certificatesResolvers.dns-cloudflare.acme.dnsChallenge.resolvers=1.1.1.1:53,1.0.0.1:53
+      - --certificatesResolvers.dns-cloudflare.acme.dnsChallenge.delayBeforeCheck=5
+    networks:
+      - traefik
+      - socket-proxy
+    security_opt:
+      - no-new-privileges:true
+    secrets:
+      - cloudflare_email
+      - cloudflare_api_key
+    depends_on:
+      - socket-proxy
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: host
+      - target: 443
+        published: 443
+        protocol: tcp
+        mode: host
+    volumes:
+      - $DOCKERDIR/traefik2/rules:/rules
+      - $DOCKERDIR/traefik2/acme/acme.json:/acme.json
+      - $DOCKERDIR/traefik2/traefik.log:/traefik.log
+      - $DOCKERDIR/shared:/shared
+    environment:
+      - TZ=$TZ
+      - PUID=$PUID
+      - PGID=$PGID
+      - CF_API_EMAIL_FILE=/run/secrets/cloudflare_email
+      - CF_API_KEY_FILE=/run/secrets/cloudflare_api_key
+    labels:
+      - "traefik.enable=true"
+      # HTTP-to-HTTPS Redirect
+      - "traefik.http.routers.http-catchall.entrypoints=http"
+      - "traefik.http.routers.http-catchall.rule=HostRegexp(`{host:.+}`)"
+      - "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      # HTTP Routers
+      - "traefik.http.routers.traefik-rtr.entrypoints=https"
+      - "traefik.http.routers.traefik-rtr.rule=Host(`traefik.$DOMAINNAME`)"
+      - "traefik.http.routers.traefik-rtr.tls=true"
+      #- "traefik.http.routers.traefik-rtr.tls.certresolver=dns-cloudflare" # Comment out this line after first run of traefik to force the use of wildcard certs
+      - "traefik.http.routers.traefik-rtr.tls.domains[0].main=$DOMAINNAME"
+      - "traefik.http.routers.traefik-rtr.tls.domains[0].sans=*.$DOMAINNAME"
+      - "traefik.http.routers.traefik-rtr.tls.domains[1].main=$MAST_DOMAIN"
+      - "traefik.http.routers.traefik-rtr.tls.domains[1].sans=*.$MAST_DOMAIN"
+      ## Services - API
+      - "traefik.http.routers.traefik-rtr.service=api@internal"
+      ## Middlewares
+      - "traefik.http.routers.traefik-rtr.middlewares=chain-basic-auth@file"
+
+  socket-proxy:
+    container_name: socket-proxy
+    image: fluencelabs/docker-socket-proxy
+    restart: always
+    networks:
+      - socket-proxy
+    privileged: true
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    ports:
+      - "127.0.0.1:2375:2375"
+    environment:
+      - TZ=$TZ
+      - PUID=$PUID
+      - PGID=$PGID
+      - LOG_LEVEL=info # debug,info,notice,warning,err,crit,alert,emerg
+      ## Variables match the URL prefix (i.e. AUTH blocks access to /auth/* parts of the API, etc.).
+      # 0 to revoke access.
+      # 1 to grant access.
+      ## Granted by Default
+      - EVENTS=1
+      - PING=1
+      - VERSION=1
+      ## Revoked by Default
+      # Security critical
+      - AUTH=0
+      - SECRETS=0
+      - POST=1 # Watchtower
+      - DELETE=1 # Watchtower
+        # GET Optons
+      - BUILD=0
+      - COMMIT=0
+      - CONFIGS=0
+      - CONTAINERS=1 # Traefik, portainer, etc.
+      - DISTRIBUTION=0
+      - EXEC=1 # Restic
+      - IMAGES=1 # Portainer, Watchtower
+      - INFO=1 # Portainer
+      - NETWORKS=1 # Portainer, Watchtower
+      - NODES=0
+      - PLUGINS=0
+      - SERVICES=1 # Portainer
+      - SESSION=0
+      - SWARM=0
+      - SYSTEM=0
+      - TASKS=1 # Portaienr
+      - VOLUMES=1 # Portainer
+      # POST Options
+      - CONTAINERS_CREATE=1 # WatchTower
+      - CONTAINERS_START=1 # WatchTower
+      - CONTAINERS_UPDATE=1 # WatchTower
+      # DELETE Options
+      - CONTAINERS_DELETE=1 # WatchTower
+      - IMAGES_DELETE=1 # WatchTower
+
+  watchtower:
+    container_name: watchtower
+    image: containrrr/watchtower:latest
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - socket-proxy
+    depends_on:
+      - socket-proxy
+    environment:
+      - TZ=$TZ
+      - PUID=$PUID
+      - PGID=$PGID
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_REMOVE_VOLUMES=true
+      - WATCHTOWER_INCLUDE_STOPPED=true
+      - WATCHTOWER_NO_STARTUP_MESSAGE=false
+      - WATCHTOWER_SCHEDULE=0 0 4 * * * # Everyday at 04:00
+      #- WATCHTOWER_NOTIFICATIONS=shoutrrr
+      #- WATCHTOWER_NOTIFICATION_URL=telegram://$TGRAM_BOT_TOKEN@telegram?channels=$TGRAM_CHAT_ID
+      #- WATCHTOWER_NOTIFICATIONS_LEVEL=info
+      - DOCKER_HOST=tcp://socket-proxy:2375
+      - DOCKER_API_VERSION=1.40
+
+  portainer:
+    container_name: portainer
+    image: portainer/portainer-ce:latest
+    restart: unless-stopped
+    networks:
+      vpn-subnet:
+        ipv4_address: 20.20.10.2
+      socket-proxy: null
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - socket-proxy
+    volumes:
+      - $DOCKERDIR/portainer:/data
+    environment:
+      - TZ=$TZ
+      - PUID=$PUID
+      - PGID=$PGID
+      - DOCKER_HOST=tcp://socket-proxy:2375
+
+  wireguard:
+    container_name: wireguard
+    image: linuxserver/wireguard:latest
+    restart: unless-stopped
+    networks:
+      vpn-subnet:
+        ipv4_address: 20.20.10.5
+    volumes:
+      - $DOCKERDIR/wireguard:/config
+      - /lib/modules:/lib/modules
+    ports:
+      - 51820:51820/udp
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - TZ=$TZ
+      - PUID=$PUID
+      - PGID=$PGID
+      - SERVERURL=wireguard.$DOMAINNAME
+      - SERVERPORT=51820
+      - PEERS=2
+      - PEERDNS=auto
+      - INTERNAL_SUBNET=10.13.14.0
+
+#  minecraft:
+#    container_name: minecraft
+#    image: itzg/minecraft-server:latest
+#    restart: always
+#    networks:
+#      - traefik
+#    depends_on:
+#      - traefik
+#    ports:
+#      - 23751:25565
+#    volumes:
+#      - $DOCKERDIR/minecraft:/data
+#    security_opt:
+#      - no-new-privileges:true
+#    environment:
+#      - TZ=$TZ
+#      - PUID=$PUID
+#      - PGID=$PGID
+#      - EULA=TRUE
+#      - TYPE=SPIGOT
+#      - MOTD=$MC_MOTD
+#      - WHITELIST=$MC_ALLOWLIST
+#      - OPS=$MC_OPLIST
+#      - MAX_PLAYERS=$MC_PLAYERCOUNT
+#      - ALLOW_NETHER=true
+#      - ENABLE_COMMAND_BLOCK=true
+#      - GENERATE_STRUCTURES=true
+#      - SPAWN_MONSTERS=true
+#      - SPAWN_NPCS=true
+#      - SERVER_NAME=PocketSand
+#      - SEED=MC_CREATIVE_SEED
+#    labels:
+#      - "traefik.enable=true"
+#      ## HTTP Routers
+#      - "traefik.http.routers.pocketsand-rtr.entrypoints=https"
+#      - "traefik.http.routers.pocketsand-rtr.rule=Host(`pocketsand.$DOMAINNAME`)"
+#      - "traefik.http.routers.pocketsand-rtr.tls=true"
+#      ## Middlewares
+#      - "traefik.http.routers.pocketsand-rtr.middlewares=chain-no-auth@file"
+#      ## HTTP Services
+#      - "traefik.http.routers.pocketsand-rtr.service=pocketsand-svc"
+#      - "traefik.http.services.pocketsand-svc.loadbalancer.server.port=25565"
+#
+#  minecraft-survival:
+#    container_name: minecraft-survival
+#    image: itzg/minecraft-server:latest
+#    restart: always
+#    networks:
+#      - traefik
+#    depends_on:
+#      - traefik
+#    ports:
+#      - 23752:25565
+#    volumes:
+#      - $DOCKERDIR/minecraft-survival:/data
+#    security_opt:
+#      - no-new-privileges:true
+#    environment:
+#      - TZ=$TZ
+#      - PUID=$PUID
+#      - PGID=$PGID
+#      - DIFFICULTY=easy
+#      - EULA=TRUE
+#      - TYPE=SPIGOT
+#      - MOTD=$MC_MOTD
+#      - WHITELIST=$MC_ALLOWLIST
+#      - MAX_PLAYERS=$MC_PLAYERCOUNT
+#      - ALLOW_NETHER=true
+#      - ENABLE_COMMAND_BLOCK=true
+#      - GENERATE_STRUCTURES=true
+#      - SPAWN_ANIMALS=true
+#      - SPAWN_MONSTERS=true
+#      - SPAWN_NPCS=true
+#      - MODE=survival
+#      - SERVER_NAME=HeartWood
+#      - SEED=$MC_SURVIVAL_SEED
+#    labels:
+#      - "traefik.enable=true"
+#      ## HTTP Routers
+#      - "traefik.http.routers.heartwood-rtr.entrypoints=https"
+#      - "traefik.http.routers.heartwood-rtr.rule=Host(`heartwood.$DOMAINNAME`)"
+#      - "traefik.http.routers.heartwood-rtr.tls=true"
+#      ## Middlewares
+#      - "traefik.http.routers.heartwood-rtr.middlewares=chain-no-auth@file"
+#      ## HTTP Services
+#      - "traefik.http.routers.heartwood-rtr.service=heartwood-svc"
+#      - "traefik.http.services.heartwood-svc.loadbalancer.server.port=25565"
+
+  postgres:
+    container_name: postgres
+    image: postgres:alpine
+    restart: unless-stopped
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:5432:5432"
+    secrets:
+      - postgres_root_password
+    volumes:
+      - $DOCKERDIR/postgres:/var/lib/postgresql/data
+    environment:
+      - TZ=$TZ
+      - PUID=$PUID
+      - PGID=$PGID
+      - POSTGRES_USER=$POSTGRES_USER
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_root_password
+
+  pgadmin:
+    container_name: pgadmin
+    image: dpage/pgadmin4:latest
+    restart: unless-stopped
+    networks:
+      internal: null
+      vpn-subnet:
+        ipv4_address: 20.20.10.3
+    depends_on:
+      - postgres
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - $DOCKERDIR/pgadmin:/var/lib/pgadmin
+    environment:
+      - TZ=$TZ
+      - PUID=$PUID
+      - PGID=$PGID
+      - PGADMIN_DEFAULT_EMAIL=$PERSONAL_EMAIL
+      - PGADMIN_DEFAULT_PASSWORD=$PGADMIN_DEFAULT_PASSWORD
+      - PGADMIN_LISTEN_PORT=5050
+
+  redis:
+    container_name: redis
+    image: redis:latest
+    restart: always
+    networks:
+      - internal
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - $DOCKERDIR/redis:/data
+    environment:
+      - TZ=$TZ
+      - PUID=$PUID
+      - PGID=$PGID
+
+#  pleroma:
+#    container_name: pleroma
+#    image: git.pleroma.social:5050/pleroma/pleroma:latest
+#    restart: always
+#    networks:
+#      - traefik
+#      - internal
+#    depends_on:
+#      - traefik
+#      - postgres
+#    ports:
+#      - 4000:4000
+#    volumes:
+#      - $DOCKERDIR/pleroma/uploads:/var/lib/pleroma/uploads
+#      - $DOCKERDIR/pleroma/config.exs:/var/lib/pleroma/config.exs
+#    security_opt:
+#      - no-new-privileges:true
+#    environment:
+#      - TZ=$TZ
+#      - PUID=$PUID
+#      - PGID=$PGID
+#      - UID=$PUID
+#      - GID=$PGID
+#      - DB_USER=pleroma
+#      - DB_PASS=$PLEROMA_POSTGRES_PASSWORD
+#      - DB_HOST=postgres
+#      - DB_NAME=pleroma
+#      - INSTANCE_NAME=$MAST_DOMAIN
+#      - ADMIN_EMAIL=$PERSONAL_EMAIL
+#      - NOTIFY_EMAIL=$SMTP_USERNAME
+#      - DOMAIN=$MAST_DOMAIN
+#      - PORT=4000
+#    labels:
+#      - "traefik.enable=true"
+#      ## HTTP Routers
+#      - "traefik.http.routers.pleroma-rtr.entrypoints=https"
+#      - "traefik.http.routers.pleroma-rtr.rule=Host(`$MAST_DOMAIN`)"
+#      - "traefik.http.routers.pleroma-rtr.tls=true"
+#      ## Middlewares
+#      - "traefik.http.routers.pleroma-rtr.middlewares=chain-no-auth@file"
+#      ## HTTP Services
+#      - "traefik.http.routers.pleroma-rtr.service=pleroma-svc"
+#      - "traefik.http.services.pleroma-svc.loadbalancer.server.port=4000"
+
+  mastodon:
+    container_name: mastodon
+    image: linuxserver/mastodon:latest
+    restart: always
+    networks:
+      - traefik
+      - internal
+    depends_on:
+      - traefik
+      - postgres
+      - redis
+    ports:
+      - 8002:80/tcp
+      - 8443:443/tcp
+    volumes:
+      - $DOCKERDIR/mastodon:/config
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - TZ=$TZ
+      - PUID=$PUID
+      - PGID=$PGID
+      - LOCAL_DOMAIN=$MAST_DOMAIN
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DB_HOST=postgres
+      - DB_USER=mastodon
+      - DB_NAME=mastodon
+      - DB_PASS=$MAST_POSTGRES_PASSWORD
+      - DB_PORT=5432
+      - ES_ENABLED=false
+      - SECRET_KEY_BASE=$SECRET_KEY_BASE
+      - OTP_SECRET=$OTP_SECRET
+      - VAPID_PRIVATE_KEY=$VAPID_PRIVATE_KEY
+      - VAPID_PUBLIC_KEY=$VAPID_PUBLIC_KEY
+      - SMTP_SERVER=$SMTP_HOST
+      - SMTP_PORT=$SMTP_PORT
+      - SMTP_LOGIN=$SMTP_USERNAME
+      - SMTP_PASSWORD=$SMTP_PASSWORD
+      - SMTP_FROM_ADDRESS=$SMTP_FROM
+      - S3_ENABLED=true
+      - S3_ENDPOINT=$S3_ENDPOINT
+      - S3_HOSTNAME=$S3_HOSTNAME
+      - S3_BUCKET=$S3_BUCKET
+      - AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+      - S3_ALIAS_HOST=$S3_ALIAS_HOST
+      #- WEB_DOMAIN=$MAST_DOMAIN #optional
+      #- RAILS_SERVE_STATIC_FILES=true
+      #- ES_HOST=es #optional
+      #- ES_PORT=9200 #optional
+      #- ES_USER=elastic #optional
+      #- ES_PASS=elastic #optional
+    labels:
+      - "traefik.enable=true"
+      ## HTTP Routers
+      - "traefik.http.routers.mastodon-rtr.entrypoints=https"
+      - "traefik.http.routers.mastodon-rtr.rule=Host(`$MAST_DOMAIN`)"
+      - "traefik.http.routers.mastodon-rtr.tls=true"
+      ## Middlewares
+      - "traefik.http.routers.mastodon-rtr.middlewares=chain-no-auth@file"
+      ## HTTP Services
+      - "traefik.http.routers.mastodon-rtr.service=mastodon-svc"
+      - "traefik.http.services.mastodon-svc.loadbalancer.server.port=443"
+      - "traefik.http.services.mastodon-svc.loadbalancer.server.scheme=https"
+      - "traefik.http.services.mastodon-svc.loadbalancer.serversTransport=masto@file"
+
+  bsl:
+    container_name: birdsitelive
+    image: nicolasconstant/birdsitelive:latest
+    restart: unless-stopped
+    networks:
+      - traefik
+      - internal
+    depends_on:
+      - traefik
+      - postgres
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "8009:80"
+    environment:
+      - TZ=$TZ
+      - PUID=$PUID
+      - PGID=$PGID
+      - Instance:Domain=bsl.$DOMAINNAME
+      - Instance:AdminEmail=name@domain.ext
+      - Instance:ResolveMentionsInProfiles=true
+      - Db:Type=postgres
+      - Db:Host=postgres
+      - Db:Name=birdsitelive
+      - Db:User=$BSL_POSTGRES_USER
+      - Db:Password=$BSL_POSTGRES_PASSWORD
+      - Twitter:ConsumerKey=$BSL_TWITTER_API_KEY
+      - Twitter:ConsumerSecret=$BSL_TWITTER_API_SECRET
+      - Moderation:FollowersWhiteListing=pierce.xyz
+      - Instance:Name=Beer In A Can Private Relay
+    labels:
+      - "traefik.enable=true"
+      ## HTTP Routers
+      - "traefik.http.routers.bsl-rtr.entrypoints=https"
+      - "traefik.http.routers.bsl-rtr.rule=Host(`bsl.$DOMAINNAME`)"
+      - "traefik.http.routers.bsl-rtr.tls=true"
+      ## Middlewares
+      - "traefik.http.routers.bsl-rtr.middlewares=chain-no-auth@file"
+      - "traefik.http.routers.bsl-rtr.middlewares=middlewares-bsl@file"
+      ## HTTP Services
+      - "traefik.http.routers.bsl-rtr.service=bsl-svc"
+      - "traefik.http.services.bsl-svc.loadbalancer.server.port=80"
+
+  restic:
+    container_name: restic
+    image: mazzolino/restic:latest
+    restart: unless-stopped
+    networks:
+      - socket-proxy
+      - internal
+    depends_on:
+      - socket-proxy
+      - postgres
+    security_opt:
+      - no-new-privileges:true
+    secrets:
+      - restic_password
+    volumes:
+      - $DOCKERDIR:/source/data:ro
+      - $DOCKERDIR/restic:/source/dbbackups/
+    environment:
+      TZ: $TZ
+      PUID: $PUID
+      PGID: $PGID
+      RUN_ON_STARTUP: "true"
+      BACKUP_CRON: "0 0 2 * * *"
+      RESTIC_REPOSITORY: b2:$B2_BUCKET:/restic
+      RESTIC_PASSWORD_FILE: /run/secrets/restic_password
+      RESTIC_BACKUP_SOURCES: /source
+      RESTIC_BACKUP_ARGS: >-
+        --verbose
+      RESTIC_FORGET_ARGS: >-
+        --keep-last 10
+        --keep-daily 7
+        --keep-weekly 5
+        --keep-monthly 12
+      B2_ACCOUNT_ID: $B2_ACCOUNT_ID
+      B2_ACCOUNT_KEY: $B2_ACCOUNT_KEY
+      DOCKER_HOST: tcp://socket-proxy:2375
+      #POST_COMMANDS_SUCCESS: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=Restic-Backup-Success'''
+      #POST_COMMANDS_FAILURE: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=Restic-Backup-Failed'''
+      PRE_COMMANDS: |-
+        docker exec postgres pg_dumpall -U $POSTGRES_USER > /source/dbbackups/postgres_dump.sql
+
+  restic-prune:
+    container_name: restic-prune
+    image: mazzolino/restic:latest
+    restart: unless-stopped
+    networks:
+      - internal
+    depends_on:
+      - restic
+      - postgres
+    security_opt:
+      - no-new-privileges:true
+    secrets:
+      - restic_password
+    volumes:
+      - $DOCKERDIR:/source/data:ro
+      - $DOCKERDIR/restic:/source/dbbackups/
+    environment:
+      TZ: $TZ
+      PUID: $PUID
+      PGID: $PGID
+      RUN_ON_STARTUP: "false"
+      PRUNE_CRON: "0 0 7 * * *"
+      RESTIC_REPOSITORY: b2:$B2_BUCKET:/restic
+      RESTIC_PASSWORD_FILE: /run/secrets/restic_password
+      B2_ACCOUNT_ID: $B2_ACCOUNT_ID
+      B2_ACCOUNT_KEY: $B2_ACCOUNT_KEY
+      #POST_COMMANDS_SUCCESS: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=Restic-Prune-Success'''
+      #POST_COMMANDS_FAILURE: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=Restic-Prune-Failed'''
+
+  restic-check:
+    container_name: restic-check
+    image: mazzolino/restic:latest
+    restart: unless-stopped
+    networks:
+      - internal
+    depends_on:
+      - restic
+      - postgres
+    security_opt:
+      - no-new-privileges:true
+    secrets:
+      - restic_password
+    volumes:
+      - $DOCKERDIR:/source/data:ro
+      - $DOCKERDIR/restic:/source/dbbackups/
+    environment:
+      TZ: $TZ
+      PUID: $PUID
+      PGID: $PGID
+      RUN_ON_STARTUP: "false"
+      CHECK_CRON: "0 15 10 * * *"
+      RESTIC_CHECK_ARGS: >-
+        --read-data-subset=10%
+      RESTIC_REPOSITORY: b2:$B2_BUCKET:/restic
+      RESTIC_PASSWORD_FILE: /run/secrets/restic_password
+      B2_ACCOUNT_ID: $B2_ACCOUNT_ID
+      B2_ACCOUNT_KEY: $B2_ACCOUNT_KEY
+      #POST_COMMANDS_SUCCESS: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=Restic-Check-Success'''
+      #POST_COMMANDS_FAILURE: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=Restic-Check-Failed'''
