@@ -536,8 +536,8 @@ services:
       - Db:Password=$BSL_POSTGRES_PASSWORD
       - Twitter:ConsumerKey=$BSL_TWITTER_API_KEY
       - Twitter:ConsumerSecret=$BSL_TWITTER_API_SECRET
-      - Moderation:FollowersWhiteListing=pierce.xyz
-      - Instance:Name=Beer In A Can Private Relay
+      - Moderation:FollowersWhiteListing=$MAST_DOMAIN
+      - Instance:Name=$BSLNAME
     labels:
       - "traefik.enable=true"
       ## HTTP Routers
