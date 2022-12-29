@@ -536,8 +536,8 @@ services:
       - Db:Password=$BSL_POSTGRES_PASSWORD
       - Twitter:ConsumerKey=$BSL_TWITTER_API_KEY
       - Twitter:ConsumerSecret=$BSL_TWITTER_API_SECRET
-      - Moderation:FollowersWhiteListing=$MAST_DOMAIN
-      - Instance:Name=$BSLNAME
+      - Moderation:FollowersWhiteListing=pierce.xyz
+      - Instance:Name=Beer In A Can Private Relay
     labels:
       - "traefik.enable=true"
       ## HTTP Routers
@@ -587,8 +587,8 @@ services:
       B2_ACCOUNT_ID: $B2_ACCOUNT_ID
       B2_ACCOUNT_KEY: $B2_ACCOUNT_KEY
       DOCKER_HOST: tcp://socket-proxy:2375
-      #POST_COMMANDS_SUCCESS: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=Restic-Backup-Success'''
-      #POST_COMMANDS_FAILURE: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=Restic-Backup-Failed'''
+      #POST_COMMANDS_SUCCESS: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=$MAST_DOMAIN-Restic-Backup-Success'''
+      POST_COMMANDS_FAILURE: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=$MAST_DOMAIN-Restic-Backup-Failed'''
       PRE_COMMANDS: |-
         docker exec postgres pg_dumpall -U $POSTGRES_USER > /source/dbbackups/postgres_dump.sql
 
@@ -618,8 +618,8 @@ services:
       RESTIC_PASSWORD_FILE: /run/secrets/restic_password
       B2_ACCOUNT_ID: $B2_ACCOUNT_ID
       B2_ACCOUNT_KEY: $B2_ACCOUNT_KEY
-      #POST_COMMANDS_SUCCESS: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=Restic-Prune-Success'''
-      #POST_COMMANDS_FAILURE: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=Restic-Prune-Failed'''
+      #POST_COMMANDS_SUCCESS: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=$MAST_DOMAIN-Restic-Prune-Success'''
+      POST_COMMANDS_FAILURE: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=$MAST_DOMAIN-Restic-Prune-Failed'''
 
   restic-check:
     container_name: restic-check
@@ -649,5 +649,5 @@ services:
       RESTIC_PASSWORD_FILE: /run/secrets/restic_password
       B2_ACCOUNT_ID: $B2_ACCOUNT_ID
       B2_ACCOUNT_KEY: $B2_ACCOUNT_KEY
-      #POST_COMMANDS_SUCCESS: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=Restic-Check-Success'''
-      #POST_COMMANDS_FAILURE: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=Restic-Check-Failed'''
+      #POST_COMMANDS_SUCCESS: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=$MAST_DOMAIN-Restic-Check-Success'''
+      POST_COMMANDS_FAILURE: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=$MAST_DOMAIN-Restic-Check-Failed'''
