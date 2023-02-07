@@ -578,7 +578,7 @@ services:
       - Db:Name=birdmakeup
       - Db:User=$BIRDMAKEUP_POSTGRES_USER
       - Db:Password=$BIRDMAKEUP_POSTGRES_PASSWORD
-      - Moderation:FollowersWhiteListing=pierce.xyz
+      - Moderation:FollowersWhiteListing=$MAST_DOMAIN
     labels:
       - "traefik.enable=true"
       ## HTTP Routers
