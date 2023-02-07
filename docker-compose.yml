@@ -508,9 +508,52 @@ services:
       - "traefik.http.services.mastodon-svc.loadbalancer.server.scheme=https"
       - "traefik.http.services.mastodon-svc.loadbalancer.serversTransport=masto@file"
 
-  bsl:
-    container_name: birdsitelive
-    image: nicolasconstant/birdsitelive:latest
+#  bsl:
+#    container_name: birdsitelive
+#    image: nicolasconstant/birdsitelive:latest
+#    restart: unless-stopped
+#    networks:
+#      - traefik
+#      - internal
+#    depends_on:
+#      - traefik
+#      - postgres
+#    security_opt:
+#      - no-new-privileges:true
+#    ports:
+#      - "8009:80"
+#    environment:
+#      - TZ=$TZ
+#      - PUID=$PUID
+#      - PGID=$PGID
+#      - Instance:Domain=bsl.$DOMAINNAME
+#      - Instance:AdminEmail=name@domain.ext
+#      - Instance:ResolveMentionsInProfiles=true
+#      - Db:Type=postgres
+#      - Db:Host=postgres
+#      - Db:Name=birdsitelive
+#      - Db:User=$BSL_POSTGRES_USER
+#      - Db:Password=$BSL_POSTGRES_PASSWORD
+#      - Twitter:ConsumerKey=$BSL_TWITTER_API_KEY
+#      - Twitter:ConsumerSecret=$BSL_TWITTER_API_SECRET
+#      - Moderation:FollowersWhiteListing=pierce.xyz
+#      - Instance:Name=Beer In A Can Private Relay
+#    labels:
+#      - "traefik.enable=true"
+#      ## HTTP Routers
+#      - "traefik.http.routers.bsl-rtr.entrypoints=https"
+#      - "traefik.http.routers.bsl-rtr.rule=Host(`bsl.$DOMAINNAME`)"
+#      - "traefik.http.routers.bsl-rtr.tls=true"
+#      ## Middlewares
+#      - "traefik.http.routers.bsl-rtr.middlewares=chain-no-auth@file"
+#      - "traefik.http.routers.bsl-rtr.middlewares=middlewares-bsl@file"
+#      ## HTTP Services
+#      - "traefik.http.routers.bsl-rtr.service=bsl-svc"
+#      - "traefik.http.services.bsl-svc.loadbalancer.server.port=80"
+
+  bmu:
+    container_name: birdmakeup
+    image: cloutier/bird.makeup:latest
     restart: unless-stopped
     networks:
       - traefik
@@ -521,35 +564,33 @@ services:
     security_opt:
       - no-new-privileges:true
     ports:
-      - "8009:80"
+      - "8010:80"
     environment:
       - TZ=$TZ
       - PUID=$PUID
       - PGID=$PGID
-      - Instance:Domain=bsl.$DOMAINNAME
+      - Instance:Domain=bmu.$DOMAINNAME
+      - Instance:Name=BIAC_Private_Relay
       - Instance:AdminEmail=name@domain.ext
       - Instance:ResolveMentionsInProfiles=true
       - Db:Type=postgres
       - Db:Host=postgres
-      - Db:Name=birdsitelive
-      - Db:User=$BSL_POSTGRES_USER
-      - Db:Password=$BSL_POSTGRES_PASSWORD
-      - Twitter:ConsumerKey=$BSL_TWITTER_API_KEY
-      - Twitter:ConsumerSecret=$BSL_TWITTER_API_SECRET
+      - Db:Name=birdmakeup
+      - Db:User=$BIRDMAKEUP_POSTGRES_USER
+      - Db:Password=$BIRDMAKEUP_POSTGRES_PASSWORD
       - Moderation:FollowersWhiteListing=pierce.xyz
-      - Instance:Name=Beer In A Can Private Relay
     labels:
       - "traefik.enable=true"
       ## HTTP Routers
-      - "traefik.http.routers.bsl-rtr.entrypoints=https"
-      - "traefik.http.routers.bsl-rtr.rule=Host(`bsl.$DOMAINNAME`)"
-      - "traefik.http.routers.bsl-rtr.tls=true"
+      - "traefik.http.routers.bmu-rtr.entrypoints=https"
+      - "traefik.http.routers.bmu-rtr.rule=Host(`bmu.$DOMAINNAME`)"
+      - "traefik.http.routers.bmu-rtr.tls=true"
       ## Middlewares
-      - "traefik.http.routers.bsl-rtr.middlewares=chain-no-auth@file"
-      - "traefik.http.routers.bsl-rtr.middlewares=middlewares-bsl@file"
+      - "traefik.http.routers.bmu-rtr.middlewares=chain-no-auth@file"
+      - "traefik.http.routers.bmu-rtr.middlewares=middlewares-bmu@file"
       ## HTTP Services
-      - "traefik.http.routers.bsl-rtr.service=bsl-svc"
-      - "traefik.http.services.bsl-svc.loadbalancer.server.port=80"
+      - "traefik.http.routers.bmu-rtr.service=bmu-svc"
+      - "traefik.http.services.bmu-svc.loadbalancer.server.port=80"
 
   restic:
     container_name: restic
