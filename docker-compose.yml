@@ -573,6 +573,8 @@ services:
       - Instance:Name=BIAC_Private_Relay
       - Instance:AdminEmail=name@domain.ext
       - Instance:ResolveMentionsInProfiles=true
+      - Instance:ParallelTwitterRequests=50
+      - Instance:ParallelFediverseRequests=20
       - Db:Type=postgres
       - Db:Host=postgres
       - Db:Name=birdmakeup
