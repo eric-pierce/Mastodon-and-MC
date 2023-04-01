@@ -565,12 +565,14 @@ services:
       - no-new-privileges:true
     ports:
       - "8010:80"
+    logging:
+      driver: "none"
     environment:
       - TZ=$TZ
       - PUID=$PUID
       - PGID=$PGID
       - Instance:Domain=bmu.$DOMAINNAME
-      - Instance:Name=BIAC_Private_Relay
+      - Instance:Name=BIAC Private Relay
       - Instance:AdminEmail=name@domain.ext
       - Instance:ResolveMentionsInProfiles=true
       - Instance:ParallelTwitterRequests=50
