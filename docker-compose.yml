@@ -443,7 +443,7 @@ services:
 
   mastodon:
     container_name: mastodon
-    image: linuxserver/mastodon:latest
+    image: linuxserver/mastodon:glitch
     restart: always
     networks:
       - traefik
@@ -575,7 +575,7 @@ services:
       - Instance:Name=BIAC Private Relay
       - Instance:AdminEmail=name@domain.ext
       - Instance:ResolveMentionsInProfiles=true
-      - Instance:ParallelTwitterRequests=50
+      - Instance:ParallelTwitterRequests=20
       - Instance:ParallelFediverseRequests=20
       - Db:Type=postgres
       - Db:Host=postgres
