@@ -553,7 +553,9 @@ services:
 
   bmu:
     container_name: birdmakeup
-    image: cloutier/bird.makeup:latest
+    image: ghcr.io/rursache/bird.makeup:latest
+#    image: cloutier/bird.makeup:latest
+#    image: ericpierce/birds:latest
     restart: unless-stopped
     networks:
       - traefik
