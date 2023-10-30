@@ -26,6 +26,8 @@ secrets:
     file: $SECRETSDIR/postgres_root_password
   restic_password:
     file: $SECRETSDIR/restic_password
+  mysql_root_password:
+    file: $SECRETSDIR/mysql_root_password
 
 ########################### SERVICES
 services:
@@ -38,7 +40,7 @@ services:
       - --global.sendAnonymousUsage=false
       - --entryPoints.http.address=:80
       - --entryPoints.https.address=:443
-        # Allow these IPs to set the X-Forwarded-* headers - Cloudflare IPs: https://www.cloudflare.com/ips/
+      # Allow these IPs to set the X-Forwarded-* headers - Cloudflare IPs: https://www.cloudflare.com/ips/
       - --entrypoints.https.forwardedHeaders.trustedIPs=$CLOUDFLARE_IPS,$LOCAL_IPS
       - --entryPoints.traefik.address=:8080
       - --entrypoints.https.http.tls.certresolver=dns-cloudflare
@@ -51,11 +53,13 @@ services:
       - --accessLog.filters.statusCodes=400-499
       - --providers.docker=true
       - --providers.docker.endpoint=tcp://socket-proxy:2375
-      - --providers.docker.defaultrule=Host(`{{ index .Labels "com.docker.compose.service" }}.$DOMAINNAME`, `$MAST_DOMAIN`)
+      - --providers.docker.defaultrule=Host(`{{ index .Labels "com.docker.compose.service" }}.$DOMAINNAME`, `$MAST_DOMAIN`, `$CELE_DOMAIN`)
       - --entrypoints.https.http.tls.domains[0].main=$DOMAINNAME
       - --entrypoints.https.http.tls.domains[0].sans=*.$DOMAINNAME
       - --entrypoints.https.http.tls.domains[1].main=$MAST_DOMAIN # Pulls main cert for second domain
       - --entrypoints.https.http.tls.domains[1].sans=*.$MAST_DOMAIN # Pulls wildcard cert for second domain
+      - --entrypoints.https.http.tls.domains[2].main=$CELE_DOMAIN # Pulls main cert for second domain
+      - --entrypoints.https.http.tls.domains[2].sans=*.$CELE_DOMAIN # Pulls wildcard cert for second domain
       - --providers.docker.exposedByDefault=false
       - --providers.docker.network=traefik
       - --providers.docker.swarmMode=false
@@ -113,6 +117,8 @@ services:
       - "traefik.http.routers.traefik-rtr.tls.domains[0].sans=*.$DOMAINNAME"
       - "traefik.http.routers.traefik-rtr.tls.domains[1].main=$MAST_DOMAIN"
       - "traefik.http.routers.traefik-rtr.tls.domains[1].sans=*.$MAST_DOMAIN"
+      - "traefik.http.routers.traefik-rtr.tls.domains[2].main=$CELE_DOMAIN"
+      - "traefik.http.routers.traefik-rtr.tls.domains[2].sans=*.$CELE_DOMAIN"
       ## Services - API
       - "traefik.http.routers.traefik-rtr.service=api@internal"
       ## Middlewares
@@ -443,7 +449,7 @@ services:
 
   mastodon:
     container_name: mastodon
-    image: linuxserver/mastodon:glitch
+    image: linuxserver/mastodon:glitch-18eacc7a-ls85
     restart: always
     networks:
       - traefik
@@ -556,7 +562,7 @@ services:
     image: ghcr.io/rursache/bird.makeup:latest
 #    image: cloutier/bird.makeup:latest
 #    image: ericpierce/birds:latest
-    restart: unless-stopped
+    restart: always
     networks:
       - traefik
       - internal
@@ -567,8 +573,12 @@ services:
       - no-new-privileges:true
     ports:
       - "8010:80"
-#    logging:
-#      driver: "none"
+#    volumes:
+#      - type: bind
+#        source: $DOCKERDIR/birdmakeup/key.json
+#        target: /app/key.json
+    logging:
+      driver: "none"
     environment:
       - TZ=$TZ
       - PUID=$PUID
@@ -597,6 +607,25 @@ services:
       ## HTTP Services
       - "traefik.http.routers.bmu-rtr.service=bmu-svc"
       - "traefik.http.services.bmu-svc.loadbalancer.server.port=80"
+
+  restarter:
+    image: docker:cli
+    restart: unless-stopped
+    networks:
+      - socket-proxy
+    depends_on:
+      - socket-proxy
+    entrypoint: ["/bin/sh","-c"]
+    command:
+      - |
+        while true; do
+          sleep 7200; docker restart birdmakeup;
+        done
+    environment:
+      TZ: $TZ
+      PUID: $PUID
+      PGID: $PGID
+      DOCKER_HOST: tcp://socket-proxy:2375
 
   restic:
     container_name: restic
@@ -698,3 +727,88 @@ services:
       B2_ACCOUNT_KEY: $B2_ACCOUNT_KEY
       #POST_COMMANDS_SUCCESS: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=$MAST_DOMAIN-Restic-Check-Success'''
       POST_COMMANDS_FAILURE: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=$MAST_DOMAIN-Restic-Check-Failed'''
+
+#  mariadb:
+#    container_name: mariadb
+#    image: mariadb:latest
+#    restart: always
+#    networks:
+#      - internal
+#    security_opt:
+#      - no-new-privileges:true
+#    ports:
+#      - "127.0.0.1:3306:3306"
+#    secrets:
+#      - mysql_root_password
+#    command: >
+#      --character-set-server=utf8mb4
+#      --collation-server=utf8mb4_unicode_ci
+#      --innodb-file-format=Barracuda
+#      --innodb-file-per-table=1
+#    volumes:
+#      - $DOCKERDIR/mariadb/data:/var/lib/mysql
+#      - $DOCKERDIR/mariadb/backups:/dbbackups
+#      - /etc/localtime:/etc/localtime:ro
+#    environment:
+#      - TZ=$TZ
+#      - PUID=$PUID
+#      - PGID=$PGID
+#      - MYSQL_ROOT_PASSWORD_FILE=/run/secrets/mysql_root_password
+#
+#  pma:
+#    container_name: phpmyadmin
+#    image: phpmyadmin/phpmyadmin:latest
+#    restart: unless-stopped
+#    networks:
+#      internal: null
+#      vpn-subnet:
+#        ipv4_address: 20.20.10.4
+#    depends_on:
+#      - mariadb
+#    secrets:
+#      - mysql_root_password
+#    environment:
+#      - TZ=$TZ
+#      - PUID=$PUID
+#      - PGID=$PGID
+#      - PMA_HOST=mariadb
+#      - MYSQL_ROOT_PASSWORD_FILE=/run/secrets/mysql_root_password
+#      - ServerName=$DOMAINNAME
+#
+#  wp:
+#    container_name: wordpress
+#    image: wordpress:latest
+#    restart: unless-stopped
+#    networks:
+#      - traefik
+#      - internal
+#    depends_on:
+#      - traefik
+#      - mariadb
+#    security_opt:
+#      - no-new-privileges:true
+#    ports:
+#      - "8011:80"
+#    volumes:
+#      - $DOCKERDIR/wordpress:/var/www/html
+#    environment:
+#      - TZ=$TZ
+#      - PUID=$PUID
+#      - PGID=$PGID
+#      - WORDPRESS_DB_HOST=mariadb
+#      - WORDPRESS_DB_USER=$CELE_USER
+#      - WORDPRESS_DB_PASSWORD=$CELE_PASSWORD
+#      - WORDPRESS_DB_NAME=celebration
+#      - ServerName=$CELE_DOMAIN
+#    labels:
+#      - "traefik.enable=true"
+#      ## HTTP Routers
+#      - "traefik.http.routers.wp-rtr.entrypoints=https"
+#      - "traefik.http.routers.wp-rtr.rule=Host(`$CELE_DOMAIN`)"
+#      - "traefik.http.routers.wp-rtr.tls=true"
+#      ## Middlewares
+#      - "traefik.http.routers.wp-rtr.middlewares=chain-no-auth@file"
+#      - "traefik.http.routers.wp-rtr.middlewares=middlewares-wp@file"
+#      ## HTTP Services
+#      - "traefik.http.routers.wp-rtr.service=wp-svc"
+#      - "traefik.http.services.wp-svc.loadbalancer.server.port=80"
