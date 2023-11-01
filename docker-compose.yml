@@ -449,7 +449,7 @@ services:
 
   mastodon:
     container_name: mastodon
-    image: linuxserver/mastodon:glitch-18eacc7a-ls85
+    image: linuxserver/mastodon:glitch
     restart: always
     networks:
       - traefik
@@ -561,7 +561,6 @@ services:
     container_name: birdmakeup
     image: ghcr.io/rursache/bird.makeup:latest
 #    image: cloutier/bird.makeup:latest
-#    image: ericpierce/birds:latest
     restart: always
     networks:
       - traefik
@@ -619,7 +618,7 @@ services:
     command:
       - |
         while true; do
-          sleep 7200; docker restart birdmakeup;
+          sleep 3600; docker restart birdmakeup;
         done
     environment:
       TZ: $TZ
