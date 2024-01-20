@@ -727,6 +727,51 @@ services:
       #POST_COMMANDS_SUCCESS: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=$MAST_DOMAIN-Restic-Check-Success'''
       POST_COMMANDS_FAILURE: 'curl -i -X GET ''https://api.telegram.org/bot$RESTIC_TGRAM_TOKEN/sendMessage?chat_id=$RESTIC_TGRAM_CHAT_ID&text=$MAST_DOMAIN-Restic-Check-Failed'''
 
+  reberic:
+    container_name: reberic
+    image: webdevops/php-nginx:8.2-alpine
+    restart: unless-stopped
+    networks:
+      - internal
+      - traefik
+    ports:
+      - 8011:80
+    depends_on:
+      - traefik
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - $DOCKERDIR/reberic:/app
+      - $DOCKERDIR/reberic-config/config.php:/var/www/config.php
+    environment:
+      - TZ=$TZ
+      - PUID=$PUID
+      - PGID=$PGID
+      - WEB_ALIAS_DOMAIN=reberic.$DOMAINNAME
+      - REBERIC_POSTGRES_USERNAME=$REBERIC_POSTGRES_USERNAME
+      - REBERIC_POSTGRES_PASSWORD=$REBERIC_POSTGRES_PASSWORD
+      - REBERIC_SMTP_HOST=$REBERIC_SMTP_HOST
+      - REBERIC_SMTP_USERNAME=$REBERIC_SMTP_USERNAME
+      - REBERIC_SMTP_PASSWORD=$REBERIC_SMTP_PASSWORD
+      - REBERIC_ACCESS_PASSWORD=$REBERIC_ACCESS_PASSWORD
+      - REBERIC_ACCESS_COOKIE=$REBERIC_ACCESS_COOKIE
+    labels:
+      - traefik.enable=true
+      ## HTTP Routers
+      - traefik.http.routers.reberic.entrypoints=https
+      - traefik.http.routers.reberic.rule=Host(`$CELE_DOMAIN`) || Host(`www.$CELE_DOMAIN`)
+      - traefik.http.routers.reberic.tls=true
+      ## Middlewares
+      - traefik.http.routers.reberic.middlewares=chain-no-auth@file
+      - traefik.http.routers.reberic.middlewares=redirect-to-non-www
+      ## HTTP Services
+      - traefik.http.routers.reberic.service=reberic-svc
+      - traefik.http.services.reberic-svc.loadbalancer.server.port=80
+      ## www-redirect
+      - traefik.http.middlewares.redirect-to-non-www.redirectregex.regex=^https?://www.$CELE_DOMAIN.com/(.*)
+      - traefik.http.middlewares.redirect-to-non-www.redirectregex.replacement=https://$CELE_DOMAIN.com/$${1}
+      - traefik.http.middlewares.redirect-to-non-www.redirectregex.permanent=true
+
 #  mariadb:
 #    container_name: mariadb
 #    image: mariadb:latest
