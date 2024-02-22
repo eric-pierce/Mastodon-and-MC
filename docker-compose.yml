@@ -732,7 +732,7 @@ services:
     image: webdevops/php-nginx:8.2-alpine
     restart: unless-stopped
     networks:
-      - internal
+#      - internal
       - traefik
     ports:
       - 8011:80
@@ -768,8 +768,8 @@ services:
       - traefik.http.routers.reberic.service=reberic-svc
       - traefik.http.services.reberic-svc.loadbalancer.server.port=80
       ## www-redirect
-      - traefik.http.middlewares.redirect-to-non-www.redirectregex.regex=^https?://www.$CELE_DOMAIN.com/(.*)
-      - traefik.http.middlewares.redirect-to-non-www.redirectregex.replacement=https://$CELE_DOMAIN.com/$${1}
+      - traefik.http.middlewares.redirect-to-non-www.redirectregex.regex=^https?://www.reberic.com/(.*)
+      - traefik.http.middlewares.redirect-to-non-www.redirectregex.replacement=https://reberic.com/$${1}
       - traefik.http.middlewares.redirect-to-non-www.redirectregex.permanent=true
 
 #  mariadb:
